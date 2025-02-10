@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Quiz Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .question-card {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .question-card.active {
+            display: block;
+        }
+        .option {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .option:hover {
+            background-color: #f8f9fa;
+        }
+        .option.selected {
+            background-color: #e3f2fd;
+            border-color: #0d6efd;
+        }
+        .results-card {
+            display: none;
+            margin-top: 20px;
+        }
+        .results-card .option.correct {
+            background-color: #d4edda;
+            border-color: #28a745;
+        }
+        .results-card .option.incorrect {
+            background-color: #f8d7da;
+            border-color: #dc3545;
+        }
+        .explanation {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            display: none;
+        }
+        .navigation-buttons {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+        #progress-bar {
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Interactive Quiz Generator</h1>
+        
+        <!-- Quiz Generation Form -->
+        <div id="quizForm" class="card p-4 mb-4">
+            <div class="mb-3">
+                <label for="topic" class="form-label">Topic</label>
+                <input type="text" class="form-control" id="topic" required>
+            </div>
+            <div class="mb-3">
+                <label for="subtopic" class="form-label">Subtopic (Optional)</label>
+                <input type="text" class="form-control" id="subtopic">
+            </div>
+            <div class="mb-3">
+                <label for="numQuestions" class="form-label">Number of Questions</label>
+                <input type="number" class="form-control" id="numQuestions" min="1" max="10" value="5">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Difficulty</label>
+                <select class="form-select" id="difficulty">
+                    <option value="easy">Easy</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="hard">Hard</option>
+                </select>
+            </div>
+            <button onclick="generateQuiz()" class="btn btn-primary">Start Quiz</button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="text-center" style="display: none;">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+
+        <!-- Quiz Container -->
+        <div id="quizContainer" style="display: none;">
+            <!-- Progress Bar -->
+            <div class="progress" id="progress-bar">
+                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+
+            <!-- Questions -->
+            <div id="questions"></div>
+
+            <!-- Navigation Buttons -->
+            <div class="navigation-buttons">
+                <button onclick="previousQuestion()" class="btn btn-secondary" id="prevBtn" style="display: none;">Previous</button>
+                <button onclick="nextQuestion()" class="btn btn-primary" id="nextBtn">Next</button>
+                <button onclick="submitQuiz()" class="btn btn-success" id="submitBtn" style="display: none;">Submit Quiz</button>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div id="resultsContainer" class="results-card">
+            <h3 class="text-center mb-4">Quiz Results</h3>
+            <div id="results"></div>
+            <div class="text-center mt-4">
+                <button onclick="restartQuiz()" class="btn btn-primary">Take Another Quiz</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let quizData = null;
+        let currentQuestion = 0;
+        let userAnswers = [];
+
+        async function generateQuiz() {
+            const topic = document.getElementById('topic').value;
+            if (!topic) {
+                alert('Please enter a topic');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('quizForm').style.display = 'none';
+            document.getElementById('quizContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/generate-assessment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        topic: topic,
+                        subtopic: document.getElementById('subtopic').value,
+                        num_questions: document.getElementById('numQuestions').value,
+                        difficulty: document.getElementById('difficulty').value,
+                        question_types: ['multiple_choice', 'true_false']
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    quizData = data.assessment;
+                    userAnswers = new Array(quizData.questions.length).fill(null);
+                    currentQuestion = 0;
+                    displayQuiz(quizData);
+                } else {
+                    alert(data.message || 'Failed to generate quiz');
+                }
+            } catch (error) {
+                alert('Error generating quiz');
+                console.error(error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayQuiz(data) {
+            const questionsContainer = document.getElementById('questions');
+            questionsContainer.innerHTML = '';
+
+            data.questions.forEach((question, index) => {
+                if (!question.error) {
+                    const questionDiv = document.createElement('div');
+                    questionDiv.className = 'question-card ' + (index === 0 ? 'active' : '');
+                    questionDiv.innerHTML = `
+                        <h5>Question ${index + 1} of ${data.questions.length}</h5>
+                        <p>${question.question}</p>
+                        <div class="options">
+                            ${question.options.map((option, optIndex) => `
+                                <div class="option" onclick="selectOption(${index}, ${optIndex})">
+                                    ${option}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    questionsContainer.appendChild(questionDiv);
+                }
+            });
+
+            updateNavigation();
+            document.getElementById('quizContainer').style.display = 'block';
+            updateProgressBar();
+        }
+
+        function selectOption(questionIndex, optionIndex) {
+            if (questionIndex !== currentQuestion) return;
+
+            const questionDiv = document.querySelectorAll('.question-card')[questionIndex];
+            const options = questionDiv.querySelectorAll('.option');
+            
+            options.forEach(opt => opt.classList.remove('selected'));
+            options[optionIndex].classList.add('selected');
+            userAnswers[questionIndex] = optionIndex;
+            
+            updateNavigation();
+        }
+
+        function nextQuestion() {
+            if (currentQuestion < quizData.questions.length - 1) {
+                document.querySelectorAll('.question-card')[currentQuestion].classList.remove('active');
+                currentQuestion++;
+                document.querySelectorAll('.question-card')[currentQuestion].classList.add('active');
+                updateNavigation();
+                updateProgressBar();
+            }
+        }
+
+        function previousQuestion() {
+            if (currentQuestion > 0) {
+                document.querySelectorAll('.question-card')[currentQuestion].classList.remove('active');
+                currentQuestion--;
+                document.querySelectorAll('.question-card')[currentQuestion].classList.add('active');
+                updateNavigation();
+                updateProgressBar();
+            }
+        }
+
+        function updateNavigation() {
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const submitBtn = document.getElementById('submitBtn');
+
+            prevBtn.style.display = currentQuestion > 0 ? 'block' : 'none';
+            nextBtn.style.display = currentQuestion < quizData.questions.length - 1 ? 'block' : 'none';
+            submitBtn.style.display = currentQuestion === quizData.questions.length - 1 && userAnswers[currentQuestion] !== null ? 'block' : 'none';
+        }
+
+        function updateProgressBar() {
+            const progress = ((currentQuestion + 1) / quizData.questions.length) * 100;
+            document.querySelector('.progress-bar').style.width = `${progress}%`;
+            document.querySelector('.progress-bar').setAttribute('aria-valuenow', progress);
+        }
+
+        function submitQuiz() {
+            const resultsContainer = document.getElementById('results');
+            resultsContainer.innerHTML = '';
+            let score = 0;
+
+            quizData.questions.forEach((question, index) => {
+                const selectedAnswer = String.fromCharCode(65 + userAnswers[index]);
+                const isCorrect = selectedAnswer === question.correct_answer;
+                if (isCorrect) score++;
+
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'card mb-3';
+                resultDiv.innerHTML = `
+                    <div class="card-body">
+                        <h5 class="card-title">Question ${index + 1}</h5>
+                        <p>${question.question}</p>
+                        <div class="options">
+                            ${question.options.map((option, optIndex) => `
+                                <div class="option ${optIndex === userAnswers[index] ? (isCorrect ? 'correct' : 'incorrect') : ''} 
+                                            ${String.fromCharCode(65 + optIndex) === question.correct_answer && !isCorrect ? 'correct' : ''}">
+                                    ${option}
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="explanation mt-3">
+                            <strong>${isCorrect ? 'Correct!' : 'Incorrect'}</strong><br>
+                            ${question.explanation}
+                        </div>
+                    </div>
+                `;
+                resultsContainer.appendChild(resultDiv);
+            });
+
+            document.getElementById('quizContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'block';
+
+            const scorePercentage = (score / quizData.questions.length) * 100;
+            resultsContainer.insertAdjacentHTML('afterbegin', `
+                <div class="alert alert-info text-center mb-4">
+                    Your Score: ${score}/${quizData.questions.length} (${scorePercentage.toFixed(1)}%)
+                </div>
+            `);
+        }
+
+        function restartQuiz() {
+            document.getElementById('quizForm').style.display = 'block';
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('topic').value = '';
+            document.getElementById('subtopic').value = '';
+        }
+    </script>
+</body>
+</html> 
